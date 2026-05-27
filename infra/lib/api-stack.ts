@@ -25,12 +25,18 @@ export class ApiStack extends Stack {
   constructor(scope: Construct, id: string, props: ApiStackProps) {
     super(scope, id, props);
 
-    const lambdaDir = path.join(__dirname, '..', 'lambda');
+    // Lambda source lives in the backend/ project (shared with the local dev
+    // server). esbuild bundles each handler and its deps at synth/deploy.
+    const backendRoot = path.join(__dirname, '..', '..', 'backend');
+    const handlersDir = path.join(backendRoot, 'src', 'handlers');
     const commonFn = {
       runtime: Runtime.NODEJS_20_X,
       architecture: Architecture.ARM_64,
       memorySize: 256,
       timeout: Duration.seconds(15),
+      projectRoot: backendRoot,
+      depsLockFilePath: path.join(backendRoot, 'package-lock.json'),
+      bundling: { externalModules: ['pg-native'] },
     };
 
     const logGroup = (id: string) =>
@@ -42,14 +48,14 @@ export class ApiStack extends Stack {
     // Public, no DB — stays out of the VPC.
     const healthFn = new NodejsFunction(this, 'HealthFn', {
       ...commonFn,
-      entry: path.join(lambdaDir, 'health.ts'),
+      entry: path.join(handlersDir, 'health.ts'),
       logGroup: logGroup('HealthLogs'),
     });
 
     // DB-touching — lives in the VPC, connects to Aurora with IAM auth.
     const venturesFn = new NodejsFunction(this, 'VenturesFn', {
       ...commonFn,
-      entry: path.join(lambdaDir, 'ventures.ts'),
+      entry: path.join(handlersDir, 'ventures.ts'),
       vpc: props.vpc,
       vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
       securityGroups: [props.lambdaSecurityGroup],
@@ -59,6 +65,8 @@ export class ApiStack extends Stack {
         DB_PORT: props.cluster.clusterEndpoint.port.toString(),
         DB_NAME: props.databaseName,
         DB_USER: props.appDbUser,
+        DB_IAM_AUTH: 'true',
+        DB_SSL: 'true',
       },
     });
 

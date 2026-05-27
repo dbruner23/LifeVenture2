@@ -1,25 +1,50 @@
 import { useMemo, useState } from 'react';
-import { Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { Screen, Text, Chip, JournalCard, BrandHeader } from '../../src/components';
 import { colors, radius, shadows, spacing } from '../../src/theme';
 import { genres } from '../../src/data/genres';
-import { ventures } from '../../src/data/ventures';
+import { useVentures } from '../../src/hooks/useVentures';
 
-// Lazy native map only — web target renders a styled placeholder.
+// Native-only map; web renders a styled placeholder.
 const MapView = Platform.OS === 'web' ? null : require('react-native-maps').default;
 const Marker = Platform.OS === 'web' ? null : require('react-native-maps').Marker;
 
+interface Region {
+  latitude: number;
+  longitude: number;
+  latitudeDelta: number;
+  longitudeDelta: number;
+}
+
+const INITIAL_REGION: Region = {
+  latitude: 25,
+  longitude: 10,
+  latitudeDelta: 110,
+  longitudeDelta: 110,
+};
+
 export default function MapDiscovery() {
   const [activeGenre, setActiveGenre] = useState('all');
-  const [activeVentureId, setActiveVentureId] = useState<string>(ventures[0].id);
+  const [activeVentureId, setActiveVentureId] = useState<string | null>(null);
+  const [region, setRegion] = useState<Region>(INITIAL_REGION);
 
-  const filtered = useMemo(() => {
-    if (activeGenre === 'all') return ventures;
-    return ventures.filter((v) => v.genre.toLowerCase() === activeGenre.replace('-', ' '));
-  }, [activeGenre]);
+  const genreLabel = activeGenre === 'all' ? undefined : genres.find((g) => g.id === activeGenre)?.label;
 
+  // Drive the query from the visible map region (native only).
+  const bbox = useMemo<[number, number, number, number] | undefined>(() => {
+    if (Platform.OS === 'web') return undefined;
+    return [
+      region.longitude - region.longitudeDelta / 2,
+      region.latitude - region.latitudeDelta / 2,
+      region.longitude + region.longitudeDelta / 2,
+      region.latitude + region.latitudeDelta / 2,
+    ];
+  }, [region]);
+
+  const { data, isLoading, isError } = useVentures({ genre: genreLabel, bbox });
+  const ventures = data ?? [];
   const active = ventures.find((v) => v.id === activeVentureId) ?? ventures[0];
 
   return (
@@ -34,26 +59,23 @@ export default function MapDiscovery() {
           }
         />
       </View>
+
       <View style={styles.mapArea}>
         {MapView ? (
           <MapView
             style={StyleSheet.absoluteFill}
-            initialRegion={{
-              latitude: 40,
-              longitude: 10,
-              latitudeDelta: 90,
-              longitudeDelta: 90,
-            }}
+            initialRegion={INITIAL_REGION}
+            onRegionChangeComplete={setRegion}
             showsCompass={false}
             showsScale={false}
             toolbarEnabled={false}
           >
-            {filtered.map((v) => (
+            {ventures.map((v) => (
               <Marker
                 key={v.id}
                 coordinate={v.coordinates}
                 onPress={() => setActiveVentureId(v.id)}
-                pinColor={v.id === activeVentureId ? colors.tertiaryAccent : colors.primary}
+                pinColor={v.id === active?.id ? colors.tertiaryAccent : colors.primary}
               />
             ))}
           </MapView>
@@ -113,7 +135,7 @@ export default function MapDiscovery() {
 
         <View style={styles.sheetHeader}>
           <Text variant="eyebrow" color="primary">
-            {filtered.length} ventures in view
+            {isLoading ? 'Searching…' : `${ventures.length} ventures in view`}
           </Text>
           <Pressable hitSlop={6} style={styles.sortBtn}>
             <Text variant="labelLg" color="primary">
@@ -123,23 +145,42 @@ export default function MapDiscovery() {
           </Pressable>
         </View>
 
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.cardScroller}
-          snapToInterval={300}
-          decelerationRate="fast"
-        >
-          {filtered.map((v) => (
-            <Pressable
-              key={v.id}
-              onPress={() => setActiveVentureId(v.id)}
-              style={[styles.cardWrap, v.id === active.id && styles.cardWrapActive]}
-            >
-              <JournalCard venture={v} variant="compact" />
-            </Pressable>
-          ))}
-        </ScrollView>
+        {isLoading ? (
+          <View style={styles.sheetState}>
+            <ActivityIndicator color={colors.primary} />
+          </View>
+        ) : isError ? (
+          <View style={styles.sheetState}>
+            <Text variant="labelMd" color="onSurfaceVariant">
+              Couldn't load this area.
+            </Text>
+          </View>
+        ) : ventures.length === 0 ? (
+          <View style={styles.sheetState}>
+            <Ionicons name="compass-outline" size={22} color={colors.onSurfaceVariant} />
+            <Text variant="labelMd" color="onSurfaceVariant" align="center" style={{ maxWidth: 240 }}>
+              No ventures here yet. Pan out, or be the first to plant a flag.
+            </Text>
+          </View>
+        ) : (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.cardScroller}
+            snapToInterval={296}
+            decelerationRate="fast"
+          >
+            {ventures.map((v) => (
+              <Pressable
+                key={v.id}
+                onPress={() => setActiveVentureId(v.id)}
+                style={[styles.cardWrap, v.id === active?.id && styles.cardWrapActive]}
+              >
+                <JournalCard venture={v} variant="compact" />
+              </Pressable>
+            ))}
+          </ScrollView>
+        )}
       </View>
     </Screen>
   );
@@ -237,6 +278,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
+  },
+  sheetState: {
+    minHeight: 200,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.page,
   },
   cardScroller: {
     paddingHorizontal: spacing.page,

@@ -90,7 +90,7 @@ export class ApiStack extends Stack {
 
     api.addRoutes({
       path: '/ventures',
-      methods: [HttpMethod.GET],
+      methods: [HttpMethod.GET, HttpMethod.POST],
       integration: new HttpLambdaIntegration('VenturesIntegration', venturesFn),
       authorizer,
     });

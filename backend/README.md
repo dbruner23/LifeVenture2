@@ -26,17 +26,17 @@ backend/
 npm install
 npm run db:up          # start PostGIS (Docker)
 npm run migrate:seed   # create schema + load sample ventures
-npm run dev            # local API at http://localhost:3000  (watch mode)
+npm run dev            # local API at http://localhost:3100  (watch mode)
 ```
 
 Try it:
 
 ```bash
-curl http://localhost:3000/health
-curl http://localhost:3000/ventures
-curl "http://localhost:3000/ventures?genre=Mountains"
-curl "http://localhost:3000/ventures?bbox=-12,35,30,72"          # viewport
-curl "http://localhost:3000/ventures?near=13.09,67.93,500000"    # within 500km, distance-ordered
+curl http://localhost:3100/health
+curl http://localhost:3100/ventures
+curl "http://localhost:3100/ventures?genre=Mountains"
+curl "http://localhost:3100/ventures?bbox=-12,35,30,72"          # viewport
+curl "http://localhost:3100/ventures?near=13.09,67.93,500000"    # within 500km, distance-ordered
 ```
 
 Stop / reset:
@@ -53,9 +53,9 @@ with `--clear`. The host differs by target:
 
 | Target | URL |
 |---|---|
-| Android emulator | `http://10.0.2.2:3000` |
-| iOS simulator / web | `http://localhost:3000` |
-| Physical device | `http://<your-LAN-IP>:3000` |
+| Android emulator | `http://10.0.2.2:3100` |
+| iOS simulator / web | `http://localhost:3100` |
+| Physical device | `http://<your-LAN-IP>:3100` |
 
 With it unset, the app stays on built-in mock data.
 

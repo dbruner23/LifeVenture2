@@ -4,3 +4,4 @@ export { BrandHeader } from './BrandHeader';
 export { Chip } from './Chip';
 export { Button } from './Button';
 export { JournalCard } from './JournalCard';
+export { AuthInput } from './AuthInput';

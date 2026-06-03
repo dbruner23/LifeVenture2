@@ -5,6 +5,17 @@ export interface VentureAuthor {
   handle: string;
 }
 
+export type MediaKind = 'image' | 'video';
+
+export interface GalleryItem {
+  kind: MediaKind;
+  /** Local file:// URI or remote URL. */
+  uri: string;
+  /** Poster frame for videos (used for thumbnails in the feed and gallery). */
+  posterUri?: string;
+  durationMs?: number;
+}
+
 export interface Venture {
   id: string;
   title: string;
@@ -13,8 +24,12 @@ export interface Venture {
   coordinates: { latitude: number; longitude: number };
   genre: string;
   duration?: string;
+  /** Always an image URL — for videos this is the poster frame. */
   coverImage: string;
-  gallery?: string[];
+  coverKind?: MediaKind;
+  /** Original video URI when coverKind === 'video'. */
+  coverVideoUri?: string;
+  gallery?: GalleryItem[];
   author: VentureAuthor;
   publishedAt: string;
   likes: number;

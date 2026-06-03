@@ -1,10 +1,11 @@
-import { ScrollView, StyleSheet, View, Pressable } from 'react-native';
+import { Alert, ScrollView, StyleSheet, View, Pressable } from 'react-native';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Screen, Text, Chip, Button, JournalCard, BrandHeader } from '../../src/components';
 import { colors, palette, radius, shadows, spacing } from '../../src/theme';
 import { ventures } from '../../src/data/ventures';
+import { useAuth } from '../../src/auth/AuthContext';
 
 const stats = [
   { value: '24', label: 'Ventures' },
@@ -37,6 +38,15 @@ const collections = [
 ];
 
 export default function ProfileScreen() {
+  const { signOut } = useAuth();
+
+  const onSignOut = () => {
+    Alert.alert('Sign out?', 'You can sign back in any time.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Sign out', style: 'destructive', onPress: () => signOut() },
+    ]);
+  };
+
   return (
     <Screen edges={['left', 'right']} statusBarStyle="light">
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
@@ -61,8 +71,8 @@ export default function ProfileScreen() {
                   <Pressable style={styles.bannerIcon} hitSlop={6}>
                     <Ionicons name="share-outline" size={18} color={colors.surface} />
                   </Pressable>
-                  <Pressable style={styles.bannerIcon} hitSlop={6}>
-                    <Ionicons name="settings-outline" size={18} color={colors.surface} />
+                  <Pressable style={styles.bannerIcon} hitSlop={6} onPress={onSignOut}>
+                    <Ionicons name="log-out-outline" size={18} color={colors.surface} />
                   </Pressable>
                 </>
               }

@@ -7,13 +7,17 @@ import { StatusBar } from 'expo-status-bar';
 import { colors, palette, radius, spacing } from '../src/theme';
 import { Text } from '../src/components/Text';
 import { Button } from '../src/components/Button';
+import { useAuth } from '../src/auth/AuthContext';
 
 export default function SplashRoute() {
+  const { status } = useAuth();
+
   useEffect(() => {
-    // Auto-advance after a beat so this works as a stub splash for now.
-    const t = setTimeout(() => router.replace('/(tabs)' as never), 1400);
+    if (status === 'loading') return;
+    const dest = status === 'signedIn' ? '/(tabs)' : '/(auth)/login';
+    const t = setTimeout(() => router.replace(dest as never), 1400);
     return () => clearTimeout(t);
-  }, []);
+  }, [status]);
 
   return (
     <View style={styles.root}>
@@ -40,13 +44,17 @@ export default function SplashRoute() {
       </View>
       <View style={styles.footer}>
         <Button
-          label="Enter the journal"
+          label={status === 'signedIn' ? 'Enter the journal' : 'Sign in to begin'}
           variant="accent"
           size="lg"
           icon="arrow-forward"
           iconPosition="trailing"
           fullWidth
-          onPress={() => router.replace('/(tabs)' as never)}
+          onPress={() =>
+            router.replace(
+              (status === 'signedIn' ? '/(tabs)' : '/(auth)/login') as never,
+            )
+          }
         />
       </View>
     </View>

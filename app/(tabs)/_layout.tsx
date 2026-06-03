@@ -1,7 +1,8 @@
-import { Tabs } from 'expo-router';
+import { Redirect, Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Platform, StyleSheet, View, type ColorValue } from 'react-native';
 import { colors, radius, shadows, spacing } from '../../src/theme';
+import { useAuth } from '../../src/auth/AuthContext';
 
 type IoniconName = keyof typeof Ionicons.glyphMap;
 
@@ -32,6 +33,10 @@ function CenterTabIcon({ focused }: { color: ColorValue; focused: boolean }) {
 }
 
 export default function TabsLayout() {
+  const { status } = useAuth();
+  if (status === 'signedOut') {
+    return <Redirect href="/(auth)/login" />;
+  }
   return (
     <Tabs
       screenOptions={{

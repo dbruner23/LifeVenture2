@@ -37,6 +37,11 @@ export function JournalCard({ venture, variant = 'feed', onPress }: JournalCardP
           {venture.duration ? (
             <Chip label={venture.duration} tone="inverse" icon="time-outline" />
           ) : null}
+          {venture.coverKind === 'video' ? (
+            <View style={styles.videoBadge}>
+              <Ionicons name="play" size={12} color={colors.inverseOnSurface} />
+            </View>
+          ) : null}
         </View>
         <View style={styles.coverFooter}>
           <View style={styles.location}>
@@ -125,7 +130,19 @@ const styles = StyleSheet.create({
     left: spacing.md,
     right: spacing.md,
     flexDirection: 'row',
+    alignItems: 'center',
     gap: spacing.sm,
+  },
+  videoBadge: {
+    marginLeft: 'auto',
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.35)',
   },
   coverFooter: {
     position: 'absolute',

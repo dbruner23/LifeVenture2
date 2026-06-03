@@ -1,6 +1,8 @@
-import { type Venture, ventures as mockVentures } from '../data/ventures';
+import { type Venture, type GalleryItem, type MediaKind } from '../data/ventures';
+import { currentUser } from '../data/user';
 import { USE_MOCK_API } from './config';
 import { apiFetch } from './client';
+import { addMockVenture, getMockVentures } from './mockStore';
 
 type TokenGetter = () => Promise<string | null>;
 
@@ -111,7 +113,7 @@ function filterMock(list: Venture[], q: VentureQuery): Venture[] {
 export async function fetchVentures(getToken: TokenGetter, q: VentureQuery = {}): Promise<Venture[]> {
   if (USE_MOCK_API) {
     await delay(400); // simulate latency so loading states are exercised
-    return filterMock(mockVentures, q);
+    return filterMock(getMockVentures(), q);
   }
 
   const params = new URLSearchParams();
@@ -123,4 +125,87 @@ export async function fetchVentures(getToken: TokenGetter, q: VentureQuery = {})
   const token = await getToken();
   const data = await apiFetch<VenturesResponse>(`/ventures${qs ? `?${qs}` : ''}`, { token });
   return data.ventures.map(mapApiVenture);
+}
+
+export interface NewVentureCover {
+  kind: MediaKind;
+  uri: string;
+  posterUri?: string;
+  durationMs?: number;
+}
+
+export interface NewVentureInput {
+  title: string;
+  body?: string;
+  excerpt?: string;
+  genre: string;
+  placeLabel: string;
+  latitude: number;
+  longitude: number;
+  duration?: string;
+  cover?: NewVentureCover | null;
+  gallery?: GalleryItem[];
+}
+
+export async function createVenture(
+  getToken: TokenGetter,
+  input: NewVentureInput,
+): Promise<Venture> {
+  if (USE_MOCK_API) {
+    await delay(500);
+    const cover = input.cover ?? null;
+    const coverPoster =
+      cover?.kind === 'video' ? cover.posterUri ?? cover.uri : cover?.uri ?? FALLBACK_COVER;
+
+    const venture: Venture = {
+      id: `local-${Date.now()}`,
+      title: input.title,
+      excerpt: input.excerpt,
+      location: input.placeLabel,
+      coordinates: { latitude: input.latitude, longitude: input.longitude },
+      genre: input.genre,
+      duration: input.duration,
+      coverImage: coverPoster,
+      coverKind: cover?.kind ?? 'image',
+      coverVideoUri: cover?.kind === 'video' ? cover.uri : undefined,
+      gallery: input.gallery,
+      author: {
+        id: currentUser.id,
+        name: currentUser.name,
+        handle: currentUser.handle,
+        avatar: currentUser.avatar,
+      },
+      publishedAt: 'Just now',
+      likes: 0,
+      saves: 0,
+    };
+    addMockVenture(venture);
+    return venture;
+  }
+
+  // Live backend doesn't yet persist video URIs or galleries (Phase 2 media).
+  // Send only fields the backend understands; the poster doubles as cover_image.
+  const token = await getToken();
+  const cover = input.cover ?? null;
+  const coverImageForBackend =
+    cover?.kind === 'video' ? cover.posterUri ?? cover.uri : cover?.uri ?? null;
+
+  const body = {
+    title: input.title,
+    body: input.body,
+    excerpt: input.excerpt,
+    genre: input.genre,
+    placeLabel: input.placeLabel,
+    latitude: input.latitude,
+    longitude: input.longitude,
+    coverImage: coverImageForBackend,
+    duration: input.duration,
+  };
+
+  const data = await apiFetch<{ venture: ApiVenture }>('/ventures', {
+    method: 'POST',
+    body,
+    token,
+  });
+  return mapApiVenture(data.venture);
 }

@@ -74,6 +74,32 @@ export class ApiStack extends Stack {
     // DataStack via the shared Lambda security group (avoids a stack cycle).
     props.cluster.grantConnect(venturesFn, props.appDbUser);
 
+    // One-shot migrate Lambda: bootstraps PostGIS + app role, applies SQL.
+    // Imports .sql files via esbuild's text loader, so the SQL ships in the
+    // bundle. Connects as the master user via Secrets Manager.
+    const migrateFn = new NodejsFunction(this, 'MigrateFn', {
+      ...commonFn,
+      entry: path.join(handlersDir, 'migrate.ts'),
+      vpc: props.vpc,
+      vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
+      securityGroups: [props.lambdaSecurityGroup],
+      logGroup: logGroup('MigrateLogs'),
+      timeout: Duration.minutes(3),
+      bundling: { externalModules: ['pg-native'], loader: { '.sql': 'text' } },
+      environment: {
+        DB_HOST: props.cluster.clusterEndpoint.hostname,
+        DB_PORT: props.cluster.clusterEndpoint.port.toString(),
+        DB_NAME: props.databaseName,
+        APP_DB_USER: props.appDbUser,
+        // Resolved by CloudFormation at deploy time from Secrets Manager; the
+        // Lambda just reads env vars (no SDK call, no VPC endpoint needed).
+        DB_MASTER_USERNAME: props.cluster.secret!.secretValueFromJson('username').unsafeUnwrap(),
+        DB_MASTER_PASSWORD: props.cluster.secret!.secretValueFromJson('password').unsafeUnwrap(),
+      },
+    });
+
+    new CfnOutput(this, 'MigrateFnName', { value: migrateFn.functionName });
+
     const authorizer = new HttpUserPoolAuthorizer('CognitoAuthorizer', props.userPool, {
       userPoolClients: [props.userPoolClient],
     });

@@ -6,6 +6,8 @@ import * as rds from 'aws-cdk-lib/aws-rds';
 interface DataStackProps extends StackProps {
   vpc: ec2.IVpc;
   lambdaSecurityGroup: ec2.ISecurityGroup;
+  /** When false, RemovalPolicy.DESTROY everywhere (clean teardown for dev). */
+  retainOnDestroy: boolean;
 }
 
 /**
@@ -35,10 +37,11 @@ export class DataStack extends Stack {
       defaultDatabaseName: this.databaseName,
       iamAuthentication: true,
       storageEncrypted: true,
-      backup: { retention: Duration.days(7) },
-      // SNAPSHOT keeps a final backup on teardown. Switch to DESTROY for a
-      // throwaway environment you want to delete cleanly (see infra/README).
-      removalPolicy: RemovalPolicy.SNAPSHOT,
+      backup: { retention: Duration.days(props.retainOnDestroy ? 7 : 1) },
+      // Dev: DESTROY for a clean `cdk destroy --all`. Prod (`-c env=prod`):
+      // SNAPSHOT keeps a final backup before delete.
+      removalPolicy: props.retainOnDestroy ? RemovalPolicy.SNAPSHOT : RemovalPolicy.DESTROY,
+      deletionProtection: props.retainOnDestroy,
     });
 
     // Allow the DB-touching Lambdas (SG owned by NetworkStack) to reach Aurora.

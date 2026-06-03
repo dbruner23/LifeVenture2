@@ -6,11 +6,16 @@ import * as cognito from 'aws-cdk-lib/aws-cognito';
  * Cognito user pool for app auth. The app client is a public mobile client
  * (no secret) using SRP. Tokens from this pool authorize the HTTP API.
  */
+interface AuthStackProps extends StackProps {
+  /** When false, RemovalPolicy.DESTROY (dev). True (prod): RETAIN. */
+  retainOnDestroy: boolean;
+}
+
 export class AuthStack extends Stack {
   readonly userPool: cognito.UserPool;
   readonly userPoolClient: cognito.UserPoolClient;
 
-  constructor(scope: Construct, id: string, props?: StackProps) {
+  constructor(scope: Construct, id: string, props: AuthStackProps) {
     super(scope, id, props);
 
     this.userPool = new cognito.UserPool(this, 'Users', {
@@ -28,7 +33,7 @@ export class AuthStack extends Stack {
         requireDigits: true,
       },
       accountRecovery: cognito.AccountRecovery.EMAIL_ONLY,
-      removalPolicy: RemovalPolicy.RETAIN,
+      removalPolicy: props.retainOnDestroy ? RemovalPolicy.RETAIN : RemovalPolicy.DESTROY,
     });
 
     this.userPoolClient = this.userPool.addClient('AppClient', {

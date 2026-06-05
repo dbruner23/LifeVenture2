@@ -1,8 +1,13 @@
-import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from 'aws-lambda';
+import type {
+  APIGatewayProxyEventV2,
+  APIGatewayProxyEventV2WithJWTAuthorizer,
+  APIGatewayProxyResultV2,
+} from 'aws-lambda';
 import { ensureConnected, getPool } from '../db';
 import {
   listVentures,
   createVentureFromBody,
+  getOrCreateUserBySub,
   ValidationError,
   type ListVenturesOptions,
 } from '../queries/ventures';
@@ -31,8 +36,11 @@ export function parseVentureQuery(qs: Record<string, string | undefined>): ListV
   return opts;
 }
 
+// HTTP API attaches JWT claims under requestContext.authorizer.jwt.claims for
+// authorized routes. GET /ventures uses the same route group + same Lambda, so
+// the wider event type is fine here.
 export const handler = async (
-  event: APIGatewayProxyEventV2,
+  event: APIGatewayProxyEventV2 | APIGatewayProxyEventV2WithJWTAuthorizer,
 ): Promise<APIGatewayProxyResultV2> => {
   const method = event.requestContext?.http?.method ?? 'GET';
 
@@ -50,8 +58,26 @@ export const handler = async (
       return { statusCode: 400, headers: JSON_HEADERS, body: JSON.stringify({ error: 'Invalid JSON body' }) };
     }
 
+    // Resolve the author from the Cognito JWT claims the API Gateway authorizer
+    // attached. Upsert into our users table by cognito_sub so we have a real
+    // local row to set as ventures.author_id.
+    const ctxAuthorizer = (event as APIGatewayProxyEventV2WithJWTAuthorizer).requestContext
+      ?.authorizer;
+    const claims = ctxAuthorizer?.jwt?.claims as
+      | Record<string, string | undefined>
+      | undefined;
+    const sub = claims?.sub;
+    if (!sub) {
+      return { statusCode: 401, headers: JSON_HEADERS, body: JSON.stringify({ error: 'Missing identity' }) };
+    }
     try {
-      const venture = await createVentureFromBody(pool, body);
+      const authorId = await getOrCreateUserBySub(pool, {
+        sub,
+        email: claims?.email,
+        name: claims?.name,
+      });
+      const bodyWithAuthor = { ...(body as Record<string, unknown>), authorId };
+      const venture = await createVentureFromBody(pool, bodyWithAuthor);
       return { statusCode: 201, headers: JSON_HEADERS, body: JSON.stringify({ venture }) };
     } catch (err) {
       if (err instanceof ValidationError) {

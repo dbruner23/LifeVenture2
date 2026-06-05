@@ -147,13 +147,43 @@ export async function createVenture(pool: Pool, input: CreateVentureInput): Prom
   return created;
 }
 
-// Resolves the venture author. Until Cognito is wired, falls back to the first
-// seeded user so the create flow is testable.
+// Resolves the venture author. With Cognito wired, callers pass the resolved
+// user id from getOrCreateUserBySub(). Falls back to the first seeded user
+// only when nothing is provided (kept for the local dev server, which has no
+// JWT and just wants the create flow to work).
 async function resolveAuthorId(pool: Pool, provided?: string): Promise<string> {
   if (provided) return provided;
   const { rows } = await pool.query('SELECT id FROM users ORDER BY created_at LIMIT 1');
   if (!rows[0]) throw new ValidationError('No users exist to author this venture');
   return rows[0].id;
+}
+
+/**
+ * Upsert the signed-in user by Cognito `sub`. Returns the local users.id to
+ * use as ventures.author_id. Idempotent — safe to call on every POST.
+ *
+ * The handle is `<email-local>_<sub-prefix>` to avoid collisions across users
+ * who share an email local part (e.g. foo@a.com vs foo@b.com).
+ */
+export async function getOrCreateUserBySub(
+  pool: Pool,
+  claims: { sub: string; email?: string; name?: string },
+): Promise<string> {
+  const existing = await pool.query('SELECT id FROM users WHERE cognito_sub = $1', [claims.sub]);
+  if (existing.rows[0]) return existing.rows[0].id;
+
+  const emailLocal = claims.email?.split('@')[0]?.toLowerCase().replace(/[^a-z0-9._-]/g, '') ?? 'explorer';
+  const handle = `@${emailLocal}_${claims.sub.slice(0, 6)}`;
+  const name = claims.name?.trim() || 'LifeVenture explorer';
+
+  const inserted = await pool.query(
+    `INSERT INTO users (cognito_sub, handle, name)
+     VALUES ($1, $2, $3)
+     ON CONFLICT (cognito_sub) DO UPDATE SET name = EXCLUDED.name
+     RETURNING id`,
+    [claims.sub, handle, name],
+  );
+  return inserted.rows[0].id;
 }
 
 // Validates a loose request body and creates the venture.

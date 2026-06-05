@@ -34,8 +34,12 @@ function CenterTabIcon({ focused }: { color: ColorValue; focused: boolean }) {
 
 export default function TabsLayout() {
   const { status } = useAuth();
-  if (status === 'signedOut') {
-    return <Redirect href="/(auth)/login" />;
+  if (status === 'loading') {
+    return <View style={{ flex: 1, backgroundColor: colors.surface }} />;
+  }
+  if (status !== 'signedIn') {
+    const dest = (status === 'pendingConfirmation' ? '/(auth)/confirm' : '/(auth)/login') as never;
+    return <Redirect href={dest} />;
   }
   return (
     <Tabs

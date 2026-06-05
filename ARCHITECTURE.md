@@ -38,26 +38,27 @@ AWS hosts the **backend, data, media, and (optionally) a landing site + OTA upda
 ## Architecture
 
 ```
- Expo / React Native app
-        |  HTTPS + Cognito JWT
+ Expo / React Native app  ---- Amplify v6 ---->  Cognito User Pool
+        |  HTTPS + Cognito ID token (JWT)            (auth)
         v
    API Gateway (HTTP API, JWT authorizer)
         |
-        +-- Lambdas (non-DB): geocode, presign uploads   --> Amazon Location, S3
+        +-- Lambdas (non-DB): /health, geocode, presign uploads --> Amazon Location, S3
         |
         v   (DB-touching Lambdas, in VPC)
    Lambda (Node 20, ARM)  ---- IAM auth ---->  Aurora Serverless v2
-        |                                       PostgreSQL + PostGIS
-        |                                       (scale-to-zero, automated backups)
+        |   /ventures (GET, POST)                PostgreSQL + PostGIS
+        |                                        (scale-to-zero, automated backups)
         |   VPC: PRIVATE_ISOLATED subnets, NO NAT, NO IGW
         +-- S3 access via free gateway endpoint
 
- Cognito User Pool (auth)
+   MigrateFn Lambda (in VPC, master creds via CFN dynamic ref)
+        bootstraps PostGIS + `app` IAM role + applies migrations/*.sql + seeds
 
- CloudFront  -->  S3 (photo originals + thumbnails)
+ CloudFront  -->  S3 (photo originals + thumbnails)      [later — Phase 2]
      ^   app uploads via presigned PUT --+
      |
- Route 53 + ACM (custom domain, TLS)      CloudWatch Logs (short retention)
+ Route 53 + ACM (custom domain, TLS)      CloudWatch Logs (14-day retention)
 ```
 
 ## Service choices & cost logic
@@ -71,7 +72,7 @@ AWS hosts the **backend, data, media, and (optionally) a landing site + OTA upda
 | Media | S3 + CloudFront | Cheap storage; CloudFront free tier ~1 TB/mo egress |
 | Geocoding | Amazon Location Service | Free tier, pay-per-request after |
 | DNS/TLS | Route 53 + ACM | ACM certs free; Route 53 zone $0.50/mo |
-| Config | Lambda env vars + SSM Parameter Store | Free; DB uses IAM auth so no secret to store |
+| Config | Lambda env vars + CFN dynamic refs to Secrets Manager (deploy-time only) | App Lambdas use IAM auth so no runtime secret fetch; the MigrateFn reads the master password at deploy time via a CloudFormation dynamic reference, avoiding a Secrets Manager VPC endpoint |
 
 ## Cost guard rails
 
@@ -81,7 +82,9 @@ The database now lives in a VPC, so the discipline is **a VPC without the expens
 2. **DB scales to zero.** Aurora Serverless v2 parks at 0 ACU after inactivity; idle cost is just storage.
 3. **Log sprawl.** CloudWatch log retention set to ~14 days, not "never expire."
 
-A **$5 AWS Budgets alarm** goes in on day one as a tripwire.
+A **$5 AWS Budgets alarm** is wired in on day one as a tripwire (`CostStack`). It emails at 50/80/100% actual spend and 100% forecasted.
+
+**Dev/prod gating.** `cdk deploy` defaults to a dev profile: `RemovalPolicy.DESTROY` on the Aurora cluster and Cognito pool, 1-day backup retention, no deletion protection — so `cdk destroy --all` truly wipes everything when iterating. `cdk deploy -c env=prod` flips Data to `SNAPSHOT` (final backup before delete) and Cognito to `RETAIN`, with 7-day backups.
 
 **Estimated monthly cost:** idle ≈ **$1–3** (Route 53 zone + Aurora storage + a few GB of S3). Small real usage (hundreds of users, thousands of photos) ≈ **$5–15/mo**, scaling with Aurora ACU-hours.
 
@@ -122,31 +125,56 @@ Representative queries this unlocks in a single statement:
 3. An S3-triggered Lambda generates thumbnails with `sharp`.
 4. CloudFront serves originals + thumbnails. Per-user key prefixes scope access.
 
-## CDK project layout
+## Repository layout
 
 ```
-infra/
-  bin/lifeventure.ts          app + env (dev/prod) via context
-  lib/network-stack.ts        VPC (PRIVATE_ISOLATED subnets) + S3 gateway endpoint
-  lib/auth-stack.ts           Cognito user pool + app client
-  lib/data-stack.ts           Aurora Serverless v2 (PostGIS), IAM auth, backups
-  lib/media-stack.ts          S3 + CloudFront (OAC) + thumbnailer Lambda
-  lib/api-stack.ts            Lambdas (NodejsFunction/esbuild) + HTTP API + JWT authorizer
-  lib/dns-stack.ts            Route 53 + ACM (cert in us-east-1 for CloudFront)
+backend/                      application code — runs locally and ships to Lambda
+  docker-compose.yml          local Postgres + PostGIS (host port 5433)
+  migrations/                 schema (*.sql, applied in order, tracked)
+  seeds/                      sample data (idempotent)
+  src/
+    db.ts                     pg pool — password auth locally, RDS IAM token on Lambda
+    migrate.ts                local migration runner (npm run migrate[:seed])
+    queries/ventures.ts       PostGIS list query (genre / bbox / radius filters)
+    handlers/                 Lambda handlers (health, ventures, migrate)
+    local-server.ts           Express dev server exposing the same routes
+
+infra/                        AWS CDK (TypeScript) IaC
+  bin/lifeventure.ts          app entry; env (dev/prod) via `-c env=prod` context
+  lib/cost-stack.ts           $5/mo AWS Budget + 50/80/100% actual / 100% forecast alerts
+  lib/network-stack.ts        VPC (PRIVATE_ISOLATED subnets), S3 gateway endpoint, shared Lambda SG
+  lib/auth-stack.ts           Cognito user pool + public mobile app client
+  lib/data-stack.ts           Aurora Serverless v2 (PostGIS, scale-to-zero), IAM auth, backups
+  lib/api-stack.ts            HTTP API + Lambdas (NodejsFunction/esbuild) + Cognito JWT authorizer
+
+src/                          Expo / React Native app
+  auth/AuthContext.tsx        Amplify v6 — signIn / signUp / confirmSignUp / fetchAuthSession
+  auth/amplifySetup.ts        Amplify config (uses src/config/cognito.ts)
+  config/cognito.ts           user pool / client IDs (overridable via EXPO_PUBLIC_*)
+  api/                        fetch client + React Query hooks (sends Cognito ID token)
 ```
+
+The same `backend/src/handlers/*` runs under the local Express server and ships as Lambdas — what you run locally is what deploys. CDK Lambdas are built with `NodejsFunction` (esbuild) and bundle `pg`; `pg-native` is externalized.
 
 - Stacks split by lifecycle so they deploy independently.
-- DB schema/migrations managed in code (e.g. a migration runner Lambda or a tool like `node-pg-migrate`), with PostGIS enabled via `CREATE EXTENSION postgis`.
-- Start with **one environment (prod)**; add `dev` later via CDK context.
-- Deploy via **GitHub Actions + OIDC** (`cdk deploy` on merge). `cdk bootstrap` runs once per account/region.
+- **DB schema/migrations**: `backend/migrations/*.sql` are tracked in a `schema_migrations` table. Locally, applied by `npm run migrate`. On AWS, applied by the **`MigrateFn`** Lambda: a one-shot VPC Lambda invoked with `{"seed": true}` after first deploy. It enables PostGIS, creates the `app` role with `rds_iam`, applies migrations, optionally seeds, and grants table privileges so future migrations stay accessible to `app`. SQL is bundled via esbuild's text loader (no runtime file I/O); master credentials are passed as env vars via a CFN dynamic reference to the cluster secret (no Secrets Manager VPC endpoint or NAT needed). Includes connection retry for the ~15s Aurora resume.
+- One environment today (default = dev). Prod via `cdk deploy -c env=prod`.
+- Future: deploy via **GitHub Actions + OIDC** (`cdk deploy` on merge). `cdk bootstrap` runs once per account/region — done for account `202972350980` / `ap-southeast-2`.
 
 ## Phased rollout
 
-- **Phase 0 — Account prep:** budget alarm, `cdk bootstrap`, GitHub OIDC deploy role.
+- **Phase 0 — Account prep:** budget alarm (CostStack), `cdk bootstrap`, GitHub OIDC deploy role.
+  - ✅ CDK bootstrapped (account `202972350980`, `ap-southeast-2`).
+  - ✅ `CostStack` (the $5/mo budget) is in code.
+  - ⏳ GitHub OIDC role not yet set up — deploys are still manual from the workstation.
 - **Phase 1 — Network + Auth + Data + API skeleton:** VPC, Cognito, Aurora + PostGIS, migrations, a CRUD Lambda for profiles + ventures; wire the RN app to real auth and data.
-- **Phase 2 — Media:** presigned uploads, CloudFront, thumbnailer; real photo galleries.
-- **Phase 3 — Social + Geo:** follow graph, friend feed, PostGIS viewport/radius/filtered queries, place search via Location Service.
-- **Phase 4 — Polish:** custom domain, alarms, automated backups/PITR tuning, OTA updates, optional landing page. Routes/regions tables when the Strava-style features land.
+  - ✅ All four stacks (`Network`, `Data`, `Auth`, `Api`) authored in CDK.
+  - ✅ `backend/` data layer with PostGIS schema + seed, viewport/radius/genre `listVentures`, `createVenture`, `getVenture`.
+  - ✅ `MigrateFn` Lambda for one-shot DB bootstrap (PostGIS + `app` IAM role + migrations + seeds).
+  - ✅ App wired to real Cognito via Amplify v6 (sign-in, sign-up, email-code confirmation, ID token attached to API calls).
+- **Phase 2 — Media:** presigned uploads, CloudFront, thumbnailer; real photo galleries. (`MediaStack` not built yet.)
+- **Phase 3 — Social + Geo:** follow graph, friend feed, broader PostGIS queries, place search via Location Service.
+- **Phase 4 — Polish:** custom domain (`DnsStack` not built yet), alarms, automated backups/PITR tuning, OTA updates, optional landing page. Routes/regions tables when the Strava-style features land.
 
 ## External dependencies (non-AWS)
 
@@ -155,4 +183,4 @@ infra/
 
 ## Operating principle
 
-Nothing is deployed to the AWS account without an explicit go-ahead — `cdk bootstrap`/`deploy`, the budget alarm, and the OIDC role all create real resources. Writing CDK code locally is safe and reversible; deployment is a deliberate, separate step.
+Nothing is deployed to the AWS account without an explicit go-ahead. `cdk synth` runs fully offline and is the way to validate changes; `cdk deploy` is a deliberate, separate step. The `CostStack` budget alarm ships first so any subsequent deploys are guarded by a tripwire from the moment they land.

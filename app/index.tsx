@@ -14,7 +14,12 @@ export default function SplashRoute() {
 
   useEffect(() => {
     if (status === 'loading') return;
-    const dest = status === 'signedIn' ? '/(tabs)' : '/(auth)/login';
+    const dest =
+      status === 'signedIn'
+        ? '/(tabs)'
+        : status === 'pendingConfirmation'
+          ? '/(auth)/confirm'
+          : '/(auth)/login';
     const t = setTimeout(() => router.replace(dest as never), 1400);
     return () => clearTimeout(t);
   }, [status]);

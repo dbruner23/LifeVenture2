@@ -1,5 +1,5 @@
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from 'aws-lambda';
-import { getPool } from '../db';
+import { ensureConnected, getPool } from '../db';
 import {
   listVentures,
   createVentureFromBody,
@@ -36,6 +36,9 @@ export const handler = async (
 ): Promise<APIGatewayProxyResultV2> => {
   const method = event.requestContext?.http?.method ?? 'GET';
 
+  const pool = getPool();
+  await ensureConnected(pool);
+
   if (method === 'POST') {
     let body: unknown;
     try {
@@ -48,7 +51,7 @@ export const handler = async (
     }
 
     try {
-      const venture = await createVentureFromBody(getPool(), body);
+      const venture = await createVentureFromBody(pool, body);
       return { statusCode: 201, headers: JSON_HEADERS, body: JSON.stringify({ venture }) };
     } catch (err) {
       if (err instanceof ValidationError) {
@@ -59,6 +62,6 @@ export const handler = async (
   }
 
   const opts = parseVentureQuery(event.queryStringParameters ?? {});
-  const ventures = await listVentures(getPool(), opts);
+  const ventures = await listVentures(pool, opts);
   return { statusCode: 200, headers: JSON_HEADERS, body: JSON.stringify({ ventures, source: 'postgis' }) };
 };

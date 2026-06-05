@@ -36,6 +36,30 @@ export function getPool(): Pool {
     idleTimeoutMillis: 10_000,
   };
 
-  pool = new Pool(config);
+  pool = new Pool({ ...config, connectionTimeoutMillis: 8_000 });
   return pool;
+}
+
+/**
+ * Aurora Serverless v2 scale-to-zero takes ~10-15s to resume on first contact;
+ * the initial TCP connect can ETIMEDOUT in that window. Call this at the top
+ * of a handler before issuing the real query.
+ */
+export async function ensureConnected(
+  pool: Pool,
+  opts: { attempts?: number; waitMs?: number } = {},
+): Promise<void> {
+  const attempts = opts.attempts ?? 5;
+  const waitMs = opts.waitMs ?? 5_000;
+  for (let i = 1; i <= attempts; i++) {
+    try {
+      await pool.query('SELECT 1');
+      return;
+    } catch (err) {
+      if (i === attempts) throw err;
+      const message = (err as { code?: string; message?: string }).code ?? (err as Error).message;
+      console.log(`db connect attempt ${i}/${attempts} failed (${message}); waiting ${waitMs}ms`);
+      await new Promise((resolve) => setTimeout(resolve, waitMs));
+    }
+  }
 }

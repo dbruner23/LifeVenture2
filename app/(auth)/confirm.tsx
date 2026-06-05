@@ -16,30 +16,49 @@ import { colors, palette, spacing } from '../../src/theme';
 import { useAuth } from '../../src/auth/AuthContext';
 
 const HERO_IMAGE =
-  'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=1400&q=80';
+  'https://images.unsplash.com/photo-1483347756197-71ef80e95f73?auto=format&fit=crop&w=1400&q=80';
 
-export default function SignupScreen() {
-  const { signUp } = useAuth();
-  const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+export default function ConfirmScreen() {
+  const { pendingEmail, confirmSignUp, resendConfirmationCode } = useAuth();
+  const [email, setEmail] = useState(pendingEmail ?? '');
+  const [code, setCode] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [resending, setResending] = useState(false);
+  const [info, setInfo] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const onSubmit = async () => {
-    if (!name.trim() || !email.trim() || password.length < 8) {
-      setError('Use your real name, an email you check, and at least 8 characters.');
+  const onConfirm = async () => {
+    if (!email.trim() || !code.trim()) {
+      setError('Enter the 6-digit code we emailed you.');
       return;
     }
     setError(null);
+    setInfo(null);
     setSubmitting(true);
     try {
-      const { requiresConfirmation } = await signUp(email.trim(), password, name.trim());
-      router.replace((requiresConfirmation ? '/(auth)/confirm' : '/(tabs)') as never);
+      await confirmSignUp(email.trim(), code.trim());
+      router.replace('/(tabs)');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Sign-up failed.');
+      setError(err instanceof Error ? err.message : 'Could not verify the code.');
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const onResend = async () => {
+    if (!email.trim()) {
+      setError('Enter your email to resend the code.');
+      return;
+    }
+    setError(null);
+    setResending(true);
+    try {
+      await resendConfirmationCode(email.trim());
+      setInfo('A new code is on the way.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not resend the code.');
+    } finally {
+      setResending(false);
     }
   };
 
@@ -56,11 +75,7 @@ export default function SignupScreen() {
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.hero}>
-            <Image
-              source={{ uri: HERO_IMAGE }}
-              style={StyleSheet.absoluteFill}
-              contentFit="cover"
-            />
+            <Image source={{ uri: HERO_IMAGE }} style={StyleSheet.absoluteFill} contentFit="cover" />
             <LinearGradient
               colors={['rgba(0,32,69,0.0)', 'rgba(0,32,69,0.55)']}
               locations={[0.3, 1]}
@@ -71,25 +86,17 @@ export default function SignupScreen() {
                 LifeVenture
               </Text>
               <Text variant="bodyLg" color="inverseOnSurface" style={styles.heroTagline}>
-                Every mile is a story. Begin your next chapter with clarity and calm.
+                Check your inbox — we sent a 6-digit code to verify it's you.
               </Text>
             </View>
           </View>
 
           <View style={styles.form}>
             <Text variant="eyebrow" color="secondary" style={styles.eyebrow}>
-              Step 1 · Create your account
+              Step 2 · Confirm your email
             </Text>
 
             <View style={styles.fields}>
-              <AuthInput
-                label="Full Name"
-                placeholder="Eleanor Rigby"
-                autoCapitalize="words"
-                autoComplete="name"
-                value={name}
-                onChangeText={setName}
-              />
               <AuthInput
                 label="Email Address"
                 placeholder="explorer@lifeventure.com"
@@ -100,28 +107,21 @@ export default function SignupScreen() {
                 onChangeText={setEmail}
               />
               <AuthInput
-                label="Create Password"
-                placeholder="At least 8 characters"
-                autoCapitalize="none"
-                autoComplete="password-new"
-                secure
-                value={password}
-                onChangeText={setPassword}
+                label="Verification Code"
+                placeholder="6-digit code"
+                keyboardType="number-pad"
+                autoComplete="one-time-code"
+                maxLength={6}
+                value={code}
+                onChangeText={setCode}
               />
             </View>
 
-            <Text variant="labelMd" color="onSurfaceVariant" style={styles.terms}>
-              By creating an account, you agree to LifeVenture's{' '}
-              <Text variant="labelMd" color="primary">
-                Terms of Exploration
-              </Text>{' '}
-              and{' '}
-              <Text variant="labelMd" color="primary">
-                Privacy Policy
+            {info ? (
+              <Text variant="labelMd" color="secondary" style={styles.info}>
+                {info}
               </Text>
-              .
-            </Text>
-
+            ) : null}
             {error ? (
               <Text variant="labelMd" color="error" style={styles.error}>
                 {error}
@@ -129,27 +129,27 @@ export default function SignupScreen() {
             ) : null}
 
             <Button
-              label={submitting ? 'Creating account…' : 'Start Your First Chapter'}
+              label={submitting ? 'Verifying…' : 'Verify and Continue'}
               variant="primary"
               size="lg"
               fullWidth
-              onPress={onSubmit}
+              onPress={onConfirm}
               disabled={submitting}
               style={styles.submit}
             />
 
-            <Pressable
-              hitSlop={8}
-              style={styles.loginRow}
-              onPress={() => router.replace('/(auth)/login')}
-            >
-              <Text variant="bodyMd" color="onSurfaceVariant">
-                Already have an account?
-              </Text>
-              <Text variant="labelLg" color="primary">
-                Log in
-              </Text>
-            </Pressable>
+            <View style={styles.actions}>
+              <Pressable hitSlop={8} onPress={onResend} disabled={resending}>
+                <Text variant="labelLg" color="primary">
+                  {resending ? 'Sending…' : 'Resend code'}
+                </Text>
+              </Pressable>
+              <Pressable hitSlop={8} onPress={() => router.replace('/(auth)/login')}>
+                <Text variant="labelLg" color="onSurfaceVariant">
+                  Back to sign in
+                </Text>
+              </Pressable>
+            </View>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -160,11 +160,9 @@ export default function SignupScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.surface },
   fill: { flex: 1 },
-  scroll: {
-    flexGrow: 1,
-  },
+  scroll: { flexGrow: 1 },
   hero: {
-    height: 280,
+    height: 240,
     backgroundColor: palette.explorerBlueDeep,
     overflow: 'hidden',
   },
@@ -174,42 +172,27 @@ const styles = StyleSheet.create({
     right: spacing.page,
     bottom: spacing.lg,
   },
-  heroWordmark: {
-    marginBottom: spacing.xs,
-  },
-  heroTagline: {
-    maxWidth: 320,
-    lineHeight: 26,
-  },
+  heroWordmark: { marginBottom: spacing.xs },
+  heroTagline: { maxWidth: 320, lineHeight: 26 },
   form: {
     flex: 1,
     paddingHorizontal: spacing.page,
     paddingTop: spacing.xl,
     paddingBottom: spacing.xxl,
   },
-  eyebrow: {
-    marginBottom: spacing.lg,
-  },
-  fields: {
-    gap: spacing.lg,
-  },
-  terms: {
-    marginTop: spacing.lg,
-    lineHeight: 18,
-  },
-  error: {
-    marginTop: spacing.md,
-  },
+  eyebrow: { marginBottom: spacing.lg },
+  fields: { gap: spacing.lg },
+  info: { marginTop: spacing.md },
+  error: { marginTop: spacing.md },
   submit: {
     marginTop: spacing.lg,
     borderRadius: 16,
     paddingVertical: spacing.md,
   },
-  loginRow: {
+  actions: {
     marginTop: spacing.xl,
     flexDirection: 'row',
-    justifyContent: 'center',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    gap: 6,
   },
 });

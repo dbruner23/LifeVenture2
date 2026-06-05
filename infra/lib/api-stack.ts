@@ -60,6 +60,9 @@ export class ApiStack extends Stack {
       vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
       securityGroups: [props.lambdaSecurityGroup],
       logGroup: logGroup('VenturesLogs'),
+      // Long enough to ride out Aurora Serverless v2 scale-to-zero resume on
+      // the first request after idle (~15s); db.ts retries inside this window.
+      timeout: Duration.seconds(30),
       environment: {
         DB_HOST: props.cluster.clusterEndpoint.hostname,
         DB_PORT: props.cluster.clusterEndpoint.port.toString(),
